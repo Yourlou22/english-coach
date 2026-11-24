@@ -1,0 +1,68 @@
+name: Build iOS (IPA non signé)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+# « contents: write » sert uniquement à publier la release « ci-latest » (IPA et journal de compilation).
+permissions:
+  contents: write
+
+concurrency:
+  group: build-ios
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    # Image avec Xcode 27 et le SDK iOS 27 (runner standard arm64, gratuit en dépôt public d'après la doc GitHub).
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versions de l'environnement
+        run: |
+          { xcodebuild -version; xcrun --sdk iphoneos --show-sdk-version; swift --version; } 2>&1 | tee -a ci.log
+
+      - name: Installer XcodeGen
+        run: brew install xcodegen 2>&1 | tee -a ci.log
+
+      - name: Générer le projet Xcode
+        run: xcodegen generate 2>&1 | tee -a ci.log
+
+      - name: Compiler (sans signature)
+        run: |
+          xcodebuild \
+            -project EnglishAICoach.xcodeproj \
+            -scheme EnglishAICoach \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee -a ci.log
+
+      - name: Empaqueter l'IPA
+        run: |
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/EnglishAICoach.app Payload/
+          zip -r EnglishAICoach.ipa Payload
+
+      # S'exécute même en cas d'échec : le journal sert à diagnostiquer sans connexion GitHub.
+      - name: Publier la release ci-latest (IPA et journal)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete ci-latest --cleanup-tag --yes || true
+          files="ci.log"
+          if [ -f EnglishAICoach.ipa ]; then files="$files EnglishAICoach.ipa"; fi
+          gh release create ci-latest $files \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Dernière compilation" \
+            --notes "Compilation automatique du commit ${{ github.sha }}. Statut de la compilation : ${{ job.status }}. L'IPA n'est pas signé : il se signe avec un Apple ID gratuit à l'installation."

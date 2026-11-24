@@ -1,0 +1,31 @@
+name: EnglishAICoach
+options:
+  bundleIdPrefix: local.englishaicoach
+  deploymentTarget:
+    iOS: "27.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  EnglishAICoach:
+    type: application
+    platform: iOS
+    sources:
+      - EnglishAICoach
+    info:
+      path: Generated/Info.plist
+      properties:
+        CFBundleDisplayName: English AI Coach
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSMicrophoneUsageDescription: "Le micro sert à parler avec le professeur d'anglais. Aucun son ne quitte l'iPhone."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: local.englishaicoach.app
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""

@@ -1,0 +1,12 @@
+*.xcodeproj/
+Generated/
+build/
+Payload/
+*.ipa
+.DS_Store
+.claude/
+# Les poids de modèles ne vont jamais dans le dépôt.
+*.aimodel
+*.aimodelc
+*.gguf
+*.safetensors
