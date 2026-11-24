@@ -10,6 +10,9 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink("ModelBench : essayer un modèle d'IA") { ModelBenchView() }
+                }
                 Section("Appareil") {
                     ForEach(deviceLines) { LabeledContent($0.label, value: $0.value) }
                 }

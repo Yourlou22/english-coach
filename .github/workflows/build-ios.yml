@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    paths-ignore:
+      - 'export/**'
+      - '.github/workflows/export-model.yml'
 
 # « contents: write » sert uniquement à publier la release « ci-latest » (IPA et journal de compilation).
 permissions:
@@ -43,6 +46,7 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
+            -skipPackagePluginValidation -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build 2>&1 | tee -a ci.log
 

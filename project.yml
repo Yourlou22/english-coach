@@ -6,14 +6,22 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
+packages:
+  CoreAIModels:
+    # Même révision que l'export des modèles (.github/workflows/export-model.yml).
+    url: https://github.com/apple/coreai-models
+    revision: ca2aecf0bf9f4f04ee2107af059b42dd309e9723
 targets:
   EnglishAICoach:
     type: application
     platform: iOS
     sources:
       - EnglishAICoach
+    dependencies:
+      - package: CoreAIModels
+        product: CoreAILM
     info:
       path: Generated/Info.plist
       properties:

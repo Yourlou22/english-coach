@@ -1,0 +1,134 @@
+name: Export d'un modèle Core AI
+
+# Se déclenche à la main, ou quand export/request.env change.
+# Convertit un modèle ouvert (Apache-2.0 uniquement) au format Core AI pour iOS avec apple/coreai-models,
+# puis le publie dans une release publique « model-<étiquette> » ; l'app l'y télécharge une seule fois.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['export/request.env']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: export-model
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # Révision d'apple/coreai-models fixée : l'export et le paquet Swift de l'app doivent être de la même version.
+  COREAI_MODELS_REVISION: ca2aecf0bf9f4f04ee2107af059b42dd309e9723
+
+jobs:
+  export:
+    runs-on: xcode-27
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lire et contrôler la demande
+        run: |
+          set -a; source export/request.env; set +a
+          [[ "$MODEL" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "MODEL invalide"; exit 1; }
+          [[ "$SLUG" =~ ^[a-z0-9.-]+$ ]] || { echo "SLUG invalide"; exit 1; }
+          [[ "$CONTEXT" =~ ^[0-9]+$ ]] || { echo "CONTEXT invalide"; exit 1; }
+          [[ "${COMPRESSION:-}" =~ ^[a-z0-9_]*$ ]] || { echo "COMPRESSION invalide"; exit 1; }
+          { echo "MODEL=$MODEL"; echo "CONTEXT=$CONTEXT"; echo "COMPRESSION=${COMPRESSION:-}"; echo "SLUG=$SLUG"; } >> "$GITHUB_ENV"
+          echo "Demande : $MODEL, contexte $CONTEXT, compression '${COMPRESSION:-défaut}', étiquette $SLUG" | tee -a export.log
+
+      - name: Vérifier que la licence du modèle est Apache-2.0
+        run: |
+          curl -fsSL "https://huggingface.co/api/models/$MODEL" -o model-info.json
+          python3 -c "import json; d=json.load(open('model-info.json')); lic=(d.get('cardData') or {}).get('license') or [t[8:] for t in d.get('tags',[]) if t.startswith('license:')]; print('Licence déclarée :', lic); import sys; sys.exit(0 if (lic=='apache-2.0' or lic==['apache-2.0']) else 1)" 2>&1 | tee -a export.log
+
+      - name: Installer uv et récupérer coreai-models à la révision fixée
+        run: |
+          {
+            HOMEBREW_NO_AUTO_UPDATE=1 brew install uv
+            git clone https://github.com/apple/coreai-models coreai-models
+            git -C coreai-models checkout "$COREAI_MODELS_REVISION"
+            uv --version
+            sw_vers
+            xcodebuild -version
+            df -h / | tail -1
+            sysctl -n hw.memsize
+          } 2>&1 | tee -a export.log
+
+      - name: Exporter le modèle pour iOS
+        run: |
+          cd coreai-models
+          args=(coreai.llm.export "$MODEL" --platform iOS --max-context-length "$CONTEXT" --output-dir "$GITHUB_WORKSPACE/out")
+          if [ -n "$COMPRESSION" ]; then args+=(--compression "$COMPRESSION"); fi
+          echo "Commande : uv run ${args[*]}" | tee -a "$GITHUB_WORKSPACE/export.log"
+          uv run "${args[@]}" 2>&1 | tee -a "$GITHUB_WORKSPACE/export.log"
+
+      - name: Inventaire du dossier exporté
+        run: |
+          { find out -type f -exec ls -l {} \; | head -200; du -sh out; } 2>&1 | tee -a export.log
+
+      - name: Empaqueter, empreintes, licence et mention
+        run: |
+          COPYFILE_DISABLE=1 tar --format=ustar -cf model.tar -C out . 2>&1 | tee -a export.log
+          size=$(stat -f%z model.tar)
+          echo "model.tar : $size octets" | tee -a export.log
+          if [ "$size" -ge 1900000000 ]; then echo "Archive trop grosse pour un seul fichier de release (limite 2 Gio)"; exit 1; fi
+          curl -fsSL "https://huggingface.co/$MODEL/resolve/main/LICENSE" -o LICENSE || curl -fsSL https://www.apache.org/licenses/LICENSE-2.0.txt -o LICENSE
+          cat > NOTICE.txt <<EOF
+          $MODEL est distribué sous licence Apache-2.0 (texte joint dans le fichier LICENSE). Copyright des auteurs du modèle (équipe Qwen, Alibaba Cloud).
+          MODIFICATIONS : les poids ont été convertis au format Core AI pour iOS et quantifiés (compression '${COMPRESSION:-défaut}', contexte fixé à $CONTEXT jetons) avec apple/coreai-models (licence BSD-3-Clause), révision $COREAI_MODELS_REVISION.
+          Source du modèle : https://huggingface.co/$MODEL
+          Ce fichier et les poids ne sont pas affiliés à leurs auteurs.
+          EOF
+          python3 - <<'PY'
+          import hashlib, json, os
+
+          def sha256(path):
+              h = hashlib.sha256()
+              with open(path, "rb") as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b""):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          manifest = {
+              "model": os.environ["MODEL"],
+              "slug": os.environ["SLUG"],
+              "contextLength": int(os.environ["CONTEXT"]),
+              "compression": os.environ.get("COMPRESSION") or "défaut",
+              "license": "Apache-2.0",
+              "toolsRevision": os.environ["COREAI_MODELS_REVISION"],
+              "archive": {"name": "model.tar", "size": os.path.getsize("model.tar"), "sha256": sha256("model.tar")},
+          }
+          with open("manifest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Publier le modèle (release publique)
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="model-$SLUG"
+          gh release delete "$tag" --cleanup-tag --yes || true
+          gh release create "$tag" model.tar manifest.json LICENSE NOTICE.txt export.log \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Modèle $MODEL (Core AI, iOS)" \
+            --notes "Poids de $MODEL convertis au format Core AI pour iOS avec apple/coreai-models (révision $COREAI_MODELS_REVISION). Licence Apache-2.0 jointe (LICENSE, NOTICE.txt). Les empreintes SHA-256 sont dans manifest.json."
+
+      - name: Publier le journal en cas d'échec
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete export-log --cleanup-tag --yes || true
+          gh release create export-log export.log \
+            --prerelease \
+            --target "${{ github.sha }}" \
+            --title "Journal du dernier export en échec" \
+            --notes "Journal de l'export du commit ${{ github.sha }}."

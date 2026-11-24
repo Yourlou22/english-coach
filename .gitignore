@@ -10,3 +10,10 @@ Payload/
 *.aimodelc
 *.gguf
 *.safetensors
+
+# Journaux et fichiers de Sideloadly : contiennent l'identifiant Apple et celui de l'appareil, jamais dans le dépôt.
+sideloadly*
+*.log
+*.db
+*.pem
+*.sqlite
