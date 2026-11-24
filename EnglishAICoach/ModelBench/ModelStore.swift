@@ -36,6 +36,18 @@ final class ModelStore: ObservableObject {
         return directory
     }
 
+    /// L'export place le modèle dans un sous-dossier (avec `metadata.json`, le `.aimodel` et `tokenizer/`) :
+    /// c'est ce dossier-là qu'il faut donner à Core AI.
+    private static func resourceFolder(in root: URL) -> URL {
+        let manager = FileManager.default
+        if manager.fileExists(atPath: root.appendingPathComponent("metadata.json").path) { return root }
+        let children = (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
+        for child in children where manager.fileExists(atPath: child.appendingPathComponent("metadata.json").path) {
+            return child
+        }
+        return root
+    }
+
     func prepare(slug: String) async {
         busy = true
         progress = 0
@@ -61,7 +73,7 @@ final class ModelStore: ObservableObject {
             if let known = try? String(contentsOf: marker, encoding: .utf8),
                known == manifest.archive.sha256,
                FileManager.default.fileExists(atPath: target.path) {
-                modelFolder = target
+                modelFolder = Self.resourceFolder(in: target)
                 status = "Modèle déjà installé : \(manifest.model), contexte \(manifest.contextLength)."
                 return
             }
@@ -92,7 +104,7 @@ final class ModelStore: ObservableObject {
             try manifest.archive.sha256.write(to: marker, atomically: true, encoding: .utf8)
             try? FileManager.default.removeItem(at: archive)
 
-            modelFolder = target
+            modelFolder = Self.resourceFolder(in: target)
             status = "Modèle prêt : \(manifest.model), contexte \(manifest.contextLength), compression \(manifest.compression)."
         } catch {
             status = "Échec : \(error.localizedDescription)"
